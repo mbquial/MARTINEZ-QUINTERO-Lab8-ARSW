@@ -20,9 +20,9 @@ on:
           - destroy
 
 permissions:
-  id-token: write      # Necesario para OIDC
+  id-token: write
   contents: read
-  pull-requests: write # Para comentar el plan en el PR
+  pull-requests: write
 
 env:
   TF_VERSION: "1.9.5"
@@ -36,6 +36,12 @@ jobs:
   plan:
     name: "Terraform Plan"
     runs-on: ubuntu-latest
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
 
     steps:
       - name: Checkout código
@@ -120,8 +126,14 @@ jobs:
     name: "Terraform Apply"
     needs: plan
     runs-on: ubuntu-latest
-    environment: production   # Requiere aprobación en GitHub → Settings → Environments
+    environment: production
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply'
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
 
     steps:
       - name: Checkout código
@@ -175,6 +187,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
 
     steps:
       - name: Checkout código
