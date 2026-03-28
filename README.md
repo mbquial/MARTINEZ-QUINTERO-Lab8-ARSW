@@ -1,222 +1,156 @@
 # Lab #8 — Infraestructura como Código con Terraform (Azure)
-**Curso:** BluePrints / ARSW  
-**Duración estimada:** 2–3 horas (base) + 1–2 horas (retos)  
-**Última actualización:** 2025-11-09
 
-## Propósito
-Modernizar el laboratorio de balanceo de carga en Azure usando **Terraform** para definir, aprovisionar y versionar la infraestructura. El objetivo es que los estudiantes diseñen y desplieguen una arquitectura reproducible, segura y con buenas prácticas de _IaC_.
-
-## Objetivos de aprendizaje
-1. Modelar infraestructura de Azure con Terraform (providers, state, módulos y variables).
-2. Desplegar una arquitectura de **alta disponibilidad** con **Load Balancer** (L4) y 2+ VMs Linux.
-3. Endurecer mínimamente la seguridad: **NSG**, **SSH por clave**, **tags**, _naming conventions_.
-4. Integrar **backend remoto** para el _state_ en Azure Storage con _state locking_.
-5. Automatizar _plan_/**apply** desde **GitHub Actions** con autenticación OIDC (sin secretos largos).
-6. Validar operación (health probe, página de prueba), observar costos y destruir con seguridad.
-
-> **Nota:** Este lab reemplaza la versión clásica basada en acciones manuales. Enfócate en _IaC_ y _pipelines_.
+**Curso:** Arquitectura de Software - ARSW  
+**Equipo:** MARTINEZ-QUINTERO  
 
 ---
 
-## Arquitectura objetivo
-- **Resource Group** (p. ej. `rg-lab8-<alias>`)
-- **Virtual Network** con 2 subredes:
-  - `subnet-web`: VMs detrás de **Azure Load Balancer (público)**
-  - `subnet-mgmt`: Bastion o salto (opcional)
-- **Network Security Group**: solo permite **80/TCP** (HTTP) desde Internet al LB y **22/TCP** (SSH) solo desde tu IP pública.
-- **Load Balancer** público:
-  - Frontend IP pública
-  - Backend pool con 2+ VMs
-  - **Health probe** (TCP/80 o HTTP)
-  - **Load balancing rule** (80 → 80)
-- **2+ VMs Linux** (Ubuntu LTS) con cloud-init/Custom Script Extension para instalar **nginx** y servir una página con el **hostname**.
-- **Azure Storage Account + Container** para Terraform **remote state** (con bloqueo).
-- **Etiquetas (tags)**: `owner`, `course`, `env`, `expires`.
+## Integrantes del equipo
 
-> **Opcional** (retos): usar **VM Scale Set**, o reemplazar LB por **Application Gateway** (L7).
+| Nombre | Perfil |
+|--------|-----|
+| María Quintero | kmdfbper |
+| Nikolas Martinez | kergnorg |
 
 ---
 
-## Requisitos previos
-- Cuenta/Subscription en Azure (Azure for Students o equivalente).
-- **Azure CLI** (`az`) y **Terraform >= 1.6** instalados en tu equipo.
-- **SSH key** generada (ej. `ssh-keygen -t ed25519`).
-- Cuenta en **GitHub** para ejecutar el pipeline de Actions.
+## Arquitectura desplegada
+
+- **Resource Group:** `lab8-rg` (región: `eastus2`)
+- **Virtual Network:** `lab8-vnet` (`10.10.0.0/16`) con subnets `subnet-web` y `subnet-mgmt`
+- **Load Balancer Standard (L4):** `lab8-lb` con frontend IP pública estática
+- **2x VM Ubuntu 22.04 LTS** (`Standard_D2as_v7`) con nginx instalado via cloud-init
+- **Network Security Group:** permite HTTP (`80/TCP`) desde Internet y SSH (`22/TCP`) desde IP del equipo
+- **Backend remoto:** Azure Storage Account `sttfstate6864` con state locking habilitado
 
 ---
 
-## Estructura del repositorio (sugerida)
+## Estructura del repositorio
+
 ```
 .
-├─ infra/
-│  ├─ main.tf
-│  ├─ providers.tf
-│  ├─ variables.tf
-│  ├─ outputs.tf
-│  ├─ backend.hcl.example
-│  ├─ cloud-init.yaml
-│  └─ env/
-│     ├─ dev.tfvars
-│     └─ prod.tfvars (opcional)
-├─ modules/
-│  ├─ vnet/
-│  │  ├─ main.tf
-│  │  ├─ variables.tf
-│  │  └─ outputs.tf
-│  ├─ compute/
-│  │  ├─ main.tf
-│  │  ├─ variables.tf
-│  │  └─ outputs.tf
-│  └─ lb/
-│     ├─ main.tf
-│     ├─ variables.tf
-│     └─ outputs.tf
-└─ .github/workflows/terraform.yml
+├── .github/
+│   └── workflows/
+│       └── terraform.yml        # Pipeline CI/CD con OIDC
+├── infra/
+│   ├── main.tf                  # Wiring de módulos y Resource Group
+│   ├── providers.tf             # Provider azurerm + backend remoto
+│   ├── variables.tf             # Variables de entrada
+│   ├── outputs.tf               # Outputs (lb_public_ip, vm_names, rg)
+│   ├── cloud-init.yaml          # Instalación automática de nginx
+│   ├── backend.hcl.example      # Ejemplo de configuración del backend
+│   └── env/
+│       └── dev.tfvars           # Variables del entorno de desarrollo
+├── modules/
+│   ├── vnet/                    # Módulo: Virtual Network y subnets
+│   ├── compute/                 # Módulo: NICs y VMs Linux
+│   └── lb/                      # Módulo: Load Balancer, NSG y reglas
+└── docs/
+    ├── Reflexion.md/            # Reflexión pedida
+    └── INSTALL_TERRAFORM.md     # Guía de instalación de Terraform
 ```
+---
+## Diagramas
 
 ---
 
-## Bootstrap del backend remoto
-Primero crea el **Resource Group**, **Storage Account** y **Container** para el _state_:
+## Capturas de funcionamiento
+![Funcionamiento de la VM0](/docs/img/vm0.png)
+
+![Funcionamiento de la VM1](/docs/img/vm1.png)
+
+![Máquinas pool](/docs/img/pool.png)
+
+![Grupo de Recursos](/docs/img/grupos.png)
+
+![gtactions](/docs/img/gtact.png)
+
+![comentario](image.png)
+
+---
+
+
+## Cómo desplegar
+
+### Requisitos previos
+
+- Azure CLI instalado y autenticado (`az login`)
+- Terraform >= 1.6 instalado
+- SSH key generada (`ssh-keygen -t ed25519`)
+- Storage Account para el backend creado (ver sección Bootstrap)
+
+### Bootstrap del backend remoto
 
 ```bash
-# Nombres únicos
 SUFFIX=$RANDOM
-LOCATION=eastus
 RG=rg-tfstate-lab8
 STO=sttfstate${SUFFIX}
-CONTAINER=tfstate
 
-az group create -n $RG -l $LOCATION
-az storage account create -g $RG -n $STO -l $LOCATION --sku Standard_LRS --encryption-services blob
-az storage container create --name $CONTAINER --account-name $STO
+az group create -n $RG -l eastus2
+az storage account create -g $RG -n $STO -l eastus2 --sku Standard_LRS --encryption-services blob
+az storage container create --name tfstate --account-name $STO
 ```
 
-Completa `infra/backend.hcl.example` con los valores creados y renómbralo a `backend.hcl`.
+### Despliegue local
 
----
-
-## Variables principales (ejemplo)
-En `infra/variables.tf` define:
-- `prefix`, `location`, `vm_count`, `admin_username`, `ssh_public_key`
-- `allow_ssh_from_cidr` (tu IPv4 en /32)
-- `tags` (map)
-
-En `infra/env/dev.tfvars`:
-```hcl
-prefix        = "lab8"
-location      = "eastus"
-vm_count      = 2
-admin_username= "student"
-ssh_public_key= "~/.ssh/id_ed25519.pub"
-allow_ssh_from_cidr = "X.X.X.X/32" # TU IP
-tags = { owner = "tu-alias", course = "ARSW/BluePrints", env = "dev", expires = "2025-12-31" }
-```
-
----
-
-## cloud-init de las VMs
-Archivo `infra/cloud-init.yaml` (instala nginx y muestra el hostname):
-```yaml
-#cloud-config
-package_update: true
-packages:
-  - nginx
-runcmd:
-  - echo "Hola desde $(hostname)" > /var/www/html/index.nginx-debian.html
-  - systemctl enable nginx
-  - systemctl restart nginx
-```
-
----
-
-## Flujo de trabajo local
 ```bash
+# 1. Completar backend.hcl con los datos del Storage Account
+cp infra/backend.hcl.example infra/backend.hcl
+# (editar con los valores reales)
+
+# 2. Inicializar con backend remoto
 cd infra
-
-# Autenticación en Azure
-az login
-az account show # verifica la suscripción activa
-
-# Inicializa Terraform con backend remoto
 terraform init -backend-config=backend.hcl
 
-# Revisión rápida
+# 3. Revisar y planificar
 terraform fmt -recursive
 terraform validate
+terraform plan -var-file=env/dev.tfvars -out=plan.tfplan
 
-# Plan con variables de dev
-terraform plan -var-file=env/dev.tfvars -out plan.tfplan
-
-# Apply
+# 4. Aplicar
 terraform apply "plan.tfplan"
 
-# Verifica el LB público (cambia por tu IP)
+# 5. Verificar
 curl http://$(terraform output -raw lb_public_ip)
 ```
 
-**Outputs esperados** (ejemplo):
-- `lb_public_ip`
-- `resource_group_name`
-- `vm_names`
+### Pipeline CI/CD
+
+- Cada Pull Request hacia `main` ejecuta `terraform fmt`, `validate` y `plan` automáticamente
+- El plan se publica como comentario en el PR para revisión del equipo
+- El apply se ejecuta manualmente desde **Actions → Terraform CI/CD → Run workflow → apply**
+- La autenticación con Azure usa **OIDC** (sin secretos de larga duración)
 
 ---
 
-## GitHub Actions (CI/CD con OIDC)
-El _workflow_ `.github/workflows/terraform.yml`:
-- Ejecuta `fmt`, `validate` y `plan` en cada PR.
-- Publica el plan como artefacto/comentario.
-- Job manual `apply` con _workflow_dispatch_ y aprobación.
+## Outputs del despliegue
 
-**Configura OIDC** en Azure (federación con tu repositorio) y asigna el rol **Contributor** al _principal_ del _workflow_ sobre el RG del lab.
-
----
-
-## Entregables en TEAMS
-1. **Repositorio GitHub** del equipo con:
-   - Código Terraform (módulos) y `cloud-init.yaml`.
-   - `backend.hcl` **(sin secretos)** y `env/dev.tfvars` (sin llaves privadas).
-   - Workflow de GitHub Actions y evidencias del `plan`.
-2. **Diagrama** (componente y secuencia) del caso de estudio propuesto.
-3. **URL/IP pública** del Load Balancer + **captura** mostrando respuesta de **2 VMs** (p. ej. refrescar y ver hostnames cambiar).
-4. **Reflexión técnica** (1 página máx.): decisiones, trade‑offs, costos aproximados y cómo destruir seguro.
-5. **Limpieza**: confirmar `terraform destroy` al finalizar.
+| Output | Descripción |
+|--------|-------------|
+| `lb_public_ip` | IP pública del Load Balancer |
+| `resource_group_name` | Nombre del Resource Group creado |
+| `vm_names` | Lista de nombres de las VMs (`["lab8-vm-0", "lab8-vm-1"]`) |
 
 ---
 
-## Rúbrica (100 pts)
-- **Infra desplegada y funcional (40 pts):** LB, 2+ VMs, health probe, NSG correcto.
-- **Buenas prácticas Terraform (20 pts):** módulos, variables, `fmt/validate`, _remote state_.
-- **Seguridad y costos (15 pts):** SSH por clave, NSG mínimo, tags y _naming_; estimación de costos.
-- **CI/CD (15 pts):** pipeline con `plan` automático y `apply` manual (OIDC).
-- **Documentación y diagramas (10 pts):** README del equipo, diagramas claros y reflexión.
+## Destrucción de recursos
 
----
-
-## Retos (elige 2+)
-- Migrar a **VM Scale Set** con _Custom Script Extension_ o **cloud-init**.
-- Reemplazar LB por **Application Gateway** con _probe_ HTTP y _path-based routing_ (si exponen múltiples apps).
-- **Azure Bastion** para acceso SSH sin IP pública en VMs.
-- **Alertas** de Azure Monitor (p. ej. estado del probe) y **Budget alert**.
-- **Módulos privados** versionados con _semantic versioning_.
-
----
-
-## Limpieza
 ```bash
 terraform destroy -var-file=env/dev.tfvars
 ```
 
-> **Tip:** Mantén los recursos etiquetados con `expires` y **elimina** todo al terminar.
+Verificar en el portal de Azure que el Resource Group `lab8-rg` haya sido eliminado. El RG del tfstate (`rg-tfstate-lab8`) puede conservarse o eliminarse con:
+
+```bash
+az group delete --name rg-tfstate-lab8 --yes
+```
 
 ---
 
 ## Preguntas de reflexión
-- ¿Por qué L4 LB vs Application Gateway (L7) en tu caso? ¿Qué cambiaría?
-- ¿Qué implicaciones de seguridad tiene exponer 22/TCP? ¿Cómo mitigarlas?
-- ¿Qué mejoras harías si esto fuera **producción**? (resiliencia, autoscaling, observabilidad).
 
----
+**¿Por qué L4 LB vs Application Gateway (L7)?**  
+El L4 LB es suficiente para distribuir tráfico HTTP básico entre VMs homogéneas. El Application Gateway es mejor cuando es necesario routing por URL, terminación TLS o WAF. Nada de lo anterior se tiene que aplicar para este laboratorio.
 
-## Créditos y material de referencia
-- Azure, Terraform, IaC, LB y VMSS (docs oficiales) — revisa enlaces en clase.
+**¿Qué implicaciones de seguridad tiene exponer 22/TCP?**  
+Aunque está restringido al CIDR del estudiante, el puerto SSH sigue siendo un vector de ataque si la IP cambia o se comparte. En producción se reemplazaría por Azure Bastion.
