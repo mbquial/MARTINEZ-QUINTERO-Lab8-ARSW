@@ -9,8 +9,8 @@
 
 | Nombre | Perfil |
 |--------|-----|
-| María Quintero | kmdfbper |
-| Nikolas Martinez | kergnorg |
+| María Quintero | [@mbquial](https://github.com/mbquial) |
+| Nikolas Martinez | [@NikoMAR3](https://github.com/NikoMAR3) |
 
 ---
 
@@ -52,9 +52,14 @@
 ---
 ## Diagramas
 
+![Componentes](/docs/img/componentes.png)
+
+![Secuencia](/docs/img/diagramaSecuencia.png)
+
 ---
 
 ## Capturas de funcionamiento
+
 ![Funcionamiento de la VM0](/docs/img/vm0.png)
 
 ![Funcionamiento de la VM1](/docs/img/vm1.png)
@@ -65,7 +70,7 @@
 
 ![gtactions](/docs/img/gtact.png)
 
-![comentario](image.png)
+![comentario](/docs/img/image.png)
 
 ---
 
