@@ -54,6 +54,22 @@
 
 ---
 
+## Capturas de funcionamiento
+![Funcionamiento de la VM0](/docs/img/vm0.png)
+
+![Funcionamiento de la VM1](/docs/img/vm1.png)
+
+![Máquinas pool](/docs/img/pool.png)
+
+![Grupo de Recursos](/docs/img/grupos.png)
+
+![gtactions](/docs/img/gtact.png)
+
+![comentario](image.png)
+
+---
+
+
 ## Cómo desplegar
 
 ### Requisitos previos
